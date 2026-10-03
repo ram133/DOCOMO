@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -5,10 +6,10 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Docomo Wallet Explorer</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 2em; }
-    .tab-menu { display: flex; gap: 10px; margin-bottom: 1em; flex-wrap: wrap; }
+    body { font-family: Arial, sans-serif; padding: 1em; margin: 0; }
+    .tab-menu { display: flex; gap: 8px; margin-bottom: 1em; flex-wrap: wrap; }
     .tab-menu button {
-      padding: 8px 16px;
+      padding: 8px 12px;
       font-size: 0.9em;
       cursor: pointer;
       border: 1px solid #ccc;
@@ -21,13 +22,16 @@
     .tab-content { display: none; }
     .tab-content.active { display: block; }
     input.searchInput {
-      margin-bottom: 1em; width: 100%; padding: 0.5em; font-size: 1em;
+      margin-bottom: 1em; width: 100%; padding: 0.5em; font-size: 1em; box-sizing: border-box;
     }
+    ul.numberList { list-style: none; padding: 0; margin: 0; }
     ul.numberList li {
       padding: 6px 0;
       display: flex;
       justify-content: space-between;
       align-items: center;
+      gap: 8px;
+      border-bottom: 1px solid #eee;
     }
     .coins { color: green; font-weight: bold; margin-right: 10px; }
     .status { margin-left: 10px; font-style: italic; }
@@ -41,133 +45,224 @@
       margin: 2px; padding: 5px 10px;
       font-size: 0.9em; cursor: pointer;
     }
+    .note { color: #666; font-size: 0.85em; }
   </style>
 </head>
 <body>
   <main>
-    <h1>📱 Docomo Wallet Explorer</h1>
+    <h1>Docomo Wallet Explorer</h1>
+    <p class="note" id="storageNote"></p>
     <div class="tab-menu" id="tabButtons"></div>
     <div id="tabContainer"></div>
   </main>
 
   <script>
-    const prefixes = [787, 777, 788, 789, 727, 828, 898];
-    const total = 9999;
-    const perPage = 200;
-    const tabButtonsDiv = document.getElementById('tabButtons');
-    const tabContainer = document.getElementById('tabContainer');
-    let walletDatas = {};
+    var prefixes = [
+      682, 683, 685, 686, 687, 688, 689,
+      727, 777, 787, 788, 789,
+      828, 898,
+      929, 969, 988, 989, 991, 996, 999
+    ];
+    var total = 9999;
+    var perPage = 200;
+    var tabButtonsDiv = document.getElementById('tabButtons');
+    var tabContainer = document.getElementById('tabContainer');
+    var overrides = {};
+    var storageOk = false;
+
+    function storageGet(key) {
+      try {
+        return localStorage.getItem(key);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    function storageSet(key, value) {
+      try {
+        localStorage.setItem(key, value);
+        storageOk = true;
+        return true;
+      } catch (e) {
+        storageOk = false;
+        return false;
+      }
+    }
+
+    function loadOverrides(prefix) {
+      var raw = storageGet('walletOverride_' + prefix);
+      if (!raw) return {};
+      try {
+        return JSON.parse(raw) || {};
+      } catch (e) {
+        return {};
+      }
+    }
+
+    function saveOverrides(prefix) {
+      storageSet('walletOverride_' + prefix, JSON.stringify(overrides[prefix]));
+    }
+
+    function phoneAt(prefix, index) {
+      return String(671) + String(prefix) + ('0000' + index).slice(-4);
+    }
+
+    function entryAt(prefix, index) {
+      var phone = phoneAt(prefix, index);
+      var saved = overrides[prefix][phone];
+      return {
+        phone: phone,
+        coins: saved ? saved.coins : 100,
+        status: saved ? saved.status : 'active'
+      };
+    }
 
     function createTab(prefix) {
-      const btn = document.createElement('button');
+      var btn = document.createElement('button');
       btn.textContent = prefix;
-      btn.dataset.prefix = prefix;
+      btn.setAttribute('data-prefix', prefix);
       tabButtonsDiv.appendChild(btn);
 
-      const wrapper = document.createElement('div');
+      var wrapper = document.createElement('div');
       wrapper.className = 'tab-content';
-      wrapper.id = `tab-${prefix}`;
-      wrapper.innerHTML = `
-        <input type="text" class="searchInput" id="search-${prefix}" placeholder="Search ${prefix} numbers..." />
-        <ul class="numberList" id="list-${prefix}"></ul>
-        <div class="pagination" id="pagination-${prefix}"></div>
-      `;
+      wrapper.id = 'tab-' + prefix;
+      wrapper.innerHTML =
+        '<input type="text" class="searchInput" id="search-' + prefix + '" placeholder="Search ' + prefix + ' numbers..." />' +
+        '<ul class="numberList" id="list-' + prefix + '"></ul>' +
+        '<div class="pagination" id="pagination-' + prefix + '"></div>';
       tabContainer.appendChild(wrapper);
     }
 
     function showTab(activePrefix) {
-      document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
-      document.querySelectorAll('.tab-menu button').forEach(btn => btn.classList.remove('active'));
-      document.getElementById(`tab-${activePrefix}`).classList.add('active');
-      [...tabButtonsDiv.children].find(b => b.textContent == activePrefix).classList.add('active');
-      renderPage(activePrefix);
+      var tabs = document.querySelectorAll('.tab-content');
+      var buttons = document.querySelectorAll('.tab-menu button');
+      var i;
+      for (i = 0; i < tabs.length; i++) tabs[i].classList.remove('active');
+      for (i = 0; i < buttons.length; i++) buttons[i].classList.remove('active');
+      document.getElementById('tab-' + activePrefix).classList.add('active');
+      for (i = 0; i < buttons.length; i++) {
+        if (buttons[i].textContent == String(activePrefix)) buttons[i].classList.add('active');
+      }
+      renderPage(activePrefix, 1);
     }
 
     function updateCoins(prefix, phone, delta) {
-      const entry = walletDatas[prefix].find(item => item.phone === phone);
-      if (!entry) return;
-      entry.coins = Math.max(0, entry.coins + delta);
-      localStorage.setItem(`walletData_${prefix}`, JSON.stringify(walletDatas[prefix]));
-      renderPage(prefix);
+      var saved = overrides[prefix][phone] || { coins: 100, status: 'active' };
+      saved.coins = Math.max(0, saved.coins + delta);
+      overrides[prefix][phone] = saved;
+      saveOverrides(prefix);
+      var pageBtn = document.querySelector('#pagination-' + prefix + ' button[data-current="1"]');
+      var page = pageBtn ? Number(pageBtn.textContent) : 1;
+      renderPage(prefix, page);
     }
 
-    function renderPage(prefix, page = 1) {
-      const filterVal = document.getElementById(`search-${prefix}`).value || '';
-      const filtered = walletDatas[prefix].filter(item => item.phone.includes(filterVal));
-      const list = document.getElementById(`list-${prefix}`);
+    function matches(phone, filterVal) {
+      return !filterVal || phone.indexOf(filterVal) !== -1;
+    }
+
+    function renderPage(prefix, page) {
+      var input = document.getElementById('search-' + prefix);
+      var filterVal = input ? input.value : '';
+      var list = document.getElementById('list-' + prefix);
       list.innerHTML = '';
 
-      const start = (page - 1) * perPage;
-      const sliced = filtered.slice(start, start + perPage);
+      var indexes = [];
+      var i;
+      if (!filterVal) {
+        for (i = 0; i < total; i++) indexes.push(i);
+      } else {
+        for (i = 0; i < total; i++) {
+          if (matches(phoneAt(prefix, i), filterVal)) indexes.push(i);
+        }
+      }
 
-      sliced.forEach(item => {
-        const li = document.createElement('li');
-        const phone = item.phone;
-        li.innerHTML = `
-          <span>${phone}</span>
-          <span>
-            <span class="coins">(${item.coins} coins)</span>
-            <span class="status">${item.status}</span>
-            <span class="wallet-actions">
-              <button data-action="send" data-phone="${phone}" data-prefix="${prefix}">Send 10</button>
-              <button data-action="receive" data-phone="${phone}" data-prefix="${prefix}">Receive 10</button>
-            </span>
-          </span>
-        `;
+      var pages = Math.max(1, Math.ceil(indexes.length / perPage));
+      if (page < 1) page = 1;
+      if (page > pages) page = pages;
+      var start = (page - 1) * perPage;
+      var sliced = indexes.slice(start, start + perPage);
+
+      for (i = 0; i < sliced.length; i++) {
+        var item = entryAt(prefix, sliced[i]);
+        var li = document.createElement('li');
+        li.innerHTML =
+          '<span>' + item.phone + '</span>' +
+          '<span>' +
+            '<span class="coins">(' + item.coins + ' coins)</span>' +
+            '<span class="status">' + item.status + '</span>' +
+            '<span class="wallet-actions">' +
+              '<button data-action="send" data-phone="' + item.phone + '" data-prefix="' + prefix + '">Send 10</button>' +
+              '<button data-action="receive" data-phone="' + item.phone + '" data-prefix="' + prefix + '">Receive 10</button>' +
+            '</span>' +
+          '</span>';
         list.appendChild(li);
-      });
+      }
 
-      renderPagination(prefix, filtered.length, page);
+      renderPagination(prefix, indexes.length, page);
     }
 
     function renderPagination(prefix, length, activePage) {
-      const container = document.getElementById(`pagination-${prefix}`);
+      var container = document.getElementById('pagination-' + prefix);
       container.innerHTML = '';
-      const pages = Math.ceil(length / perPage);
-      for (let i = 1; i <= pages; i++) {
-        const btn = document.createElement('button');
+      var pages = Math.max(1, Math.ceil(length / perPage));
+      var i;
+      for (i = 1; i <= pages; i++) {
+        var btn = document.createElement('button');
         btn.textContent = i;
-        if (i === activePage) btn.style.fontWeight = 'bold';
-        btn.addEventListener('click', () => renderPage(prefix, i));
+        if (i === activePage) {
+          btn.style.fontWeight = 'bold';
+          btn.setAttribute('data-current', '1');
+        }
+        btn.onclick = (function (n) {
+          return function () { renderPage(prefix, n); };
+        })(i);
         container.appendChild(btn);
       }
     }
 
     function init() {
-      prefixes.forEach(prefix => {
+      var probe = storageSet('walletProbe', '1');
+      var note = document.getElementById('storageNote');
+      note.textContent = probe
+        ? '21 prefixes. Changes are saved on this device.'
+        : '21 prefixes. Preview storage is blocked, so coins reset when you leave.';
+
+      var p;
+      for (p = 0; p < prefixes.length; p++) {
+        var prefix = prefixes[p];
+        overrides[prefix] = loadOverrides(prefix);
         createTab(prefix);
-        const base = Number('671' + prefix + '0000');
-        const key = `walletData_${prefix}`;
-        const saved = localStorage.getItem(key);
+        (function (current) {
+          document.getElementById('search-' + current).oninput = function () {
+            renderPage(current, 1);
+          };
+        })(prefix);
+      }
 
-        walletDatas[prefix] = saved ? JSON.parse(saved) : Array.from({ length: total }, (_, i) => ({
-          phone: (base + i).toString(),
-          coins: 100,
-          status: 'active'
-        }));
+      tabButtonsDiv.onclick = function (e) {
+        var t = e.target || e.srcElement;
+        if (t && t.tagName === 'BUTTON') showTab(t.getAttribute('data-prefix'));
+      };
 
-        if (!saved) localStorage.setItem(key, JSON.stringify(walletDatas[prefix]));
-
-        document.getElementById(`search-${prefix}`).addEventListener('input', () => renderPage(prefix, 1));
-      });
-
-      tabButtonsDiv.addEventListener('click', e => {
-        if (e.target.tagName === 'BUTTON') {
-          showTab(e.target.dataset.prefix);
-        }
-      });
-
-      tabContainer.addEventListener('click', e => {
-        if (e.target.tagName === 'BUTTON' && e.target.dataset.action) {
-          const { action, phone, prefix } = e.target.dataset;
-          updateCoins(prefix, phone, action === 'send' ? -10 : 10);
-        }
-      });
+      tabContainer.onclick = function (e) {
+        var t = e.target || e.srcElement;
+        if (!t || t.tagName !== 'BUTTON') return;
+        var action = t.getAttribute('data-action');
+        if (!action) return;
+        updateCoins(t.getAttribute('data-prefix'), t.getAttribute('data-phone'), action === 'send' ? -10 : 10);
+      };
 
       showTab(prefixes[0]);
     }
 
-    window.addEventListener('DOMContentLoaded', init);
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', init);
+    } else {
+      init();
+    }
   </script>
 </body>
 </html>
+```
+
+Save it as an `.html` file in Koder, then open the built-in preview. Tabs, search, and Send/Receive work without prebuilding every number.
