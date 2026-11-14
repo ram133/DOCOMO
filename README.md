@@ -6,9 +6,9 @@
   <title>Docomo Wallet Explorer</title>
   <style>
     body { font-family: Arial, sans-serif; padding: 2em; }
-    .tab-menu { display: flex; gap: 10px; margin-bottom: 1em; flex-wrap: wrap; }
+    .tab-menu { display: flex; gap: 8px; margin-bottom: 1em; flex-wrap: wrap; }
     .tab-menu button {
-      padding: 8px 16px;
+      padding: 6px 12px;
       font-size: 0.9em;
       cursor: pointer;
       border: 1px solid #ccc;
@@ -22,9 +22,12 @@
     .tab-content.active { display: block; }
     input.searchInput {
       margin-bottom: 1em; width: 100%; padding: 0.5em; font-size: 1em;
+      box-sizing: border-box;
     }
+    ul.numberList { list-style: none; padding: 0; }
     ul.numberList li {
       padding: 6px 0;
+      border-bottom: 1px solid #eee;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -51,12 +54,41 @@
   </main>
 
   <script>
-    const prefixes = [787, 777, 788, 789, 727, 828, 898];
-    const total = 9999;
+    const prefixes = [
+      300, 333, 339, 344, 355, 362, 366,
+      400, 456, 471, 472, 473, 474, 475, 477, 478, 479, 480, 482, 483, 486, 487, 488, 489,
+      562, 563, 564, 565, 588,
+      632, 633, 634, 635, 637, 638, 642, 644, 645, 646, 647, 648, 649, 653, 654, 682, 683, 685, 686, 687, 688, 689,
+      727, 734, 735, 777, 787, 788, 789, 797,
+      828, 864, 868, 888, 898,
+      922, 929, 969, 971, 972, 977, 979, 987, 988, 989, 997, 998
+    ];
+    const total = 10000;
     const perPage = 200;
     const tabButtonsDiv = document.getElementById('tabButtons');
     const tabContainer = document.getElementById('tabContainer');
     let walletDatas = {};
+
+    function ensurePrefixData(prefix) {
+      if (walletDatas[prefix]) return;
+      const base = Number('671' + prefix + '0000');
+      const key = `walletData_${prefix}`;
+      const saved = localStorage.getItem(key);
+
+      walletDatas[prefix] = saved ? JSON.parse(saved) : Array.from({ length: total }, (_, i) => ({
+        phone: (base + i).toString(),
+        coins: 100,
+        status: 'active'
+      }));
+
+      if (!saved) {
+        try {
+          localStorage.setItem(key, JSON.stringify(walletDatas[prefix]));
+        } catch (e) {
+          console.warn(`LocalStorage full; ${prefix} running in memory only.`);
+        }
+      }
+    }
 
     function createTab(prefix) {
       const btn = document.createElement('button');
@@ -68,18 +100,21 @@
       wrapper.className = 'tab-content';
       wrapper.id = `tab-${prefix}`;
       wrapper.innerHTML = `
-        <input type="text" class="searchInput" id="search-${prefix}" placeholder="Search ${prefix} numbers..." />
+        <input type="text" class="searchInput" id="search-${prefix}" placeholder="Search 671-${prefix} numbers..." />
         <ul class="numberList" id="list-${prefix}"></ul>
         <div class="pagination" id="pagination-${prefix}"></div>
       `;
       tabContainer.appendChild(wrapper);
+
+      document.getElementById(`search-${prefix}`).addEventListener('input', () => renderPage(prefix, 1));
     }
 
     function showTab(activePrefix) {
+      ensurePrefixData(activePrefix);
       document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
       document.querySelectorAll('.tab-menu button').forEach(btn => btn.classList.remove('active'));
       document.getElementById(`tab-${activePrefix}`).classList.add('active');
-      [...tabButtonsDiv.children].find(b => b.textContent == activePrefix).classList.add('active');
+      [...tabButtonsDiv.children].find(b => b.dataset.prefix == activePrefix).classList.add('active');
       renderPage(activePrefix);
     }
 
@@ -87,7 +122,9 @@
       const entry = walletDatas[prefix].find(item => item.phone === phone);
       if (!entry) return;
       entry.coins = Math.max(0, entry.coins + delta);
-      localStorage.setItem(`walletData_${prefix}`, JSON.stringify(walletDatas[prefix]));
+      try {
+        localStorage.setItem(`walletData_${prefix}`, JSON.stringify(walletDatas[prefix]));
+      } catch (e) {}
       renderPage(prefix);
     }
 
@@ -134,22 +171,7 @@
     }
 
     function init() {
-      prefixes.forEach(prefix => {
-        createTab(prefix);
-        const base = Number('671' + prefix + '0000');
-        const key = `walletData_${prefix}`;
-        const saved = localStorage.getItem(key);
-
-        walletDatas[prefix] = saved ? JSON.parse(saved) : Array.from({ length: total }, (_, i) => ({
-          phone: (base + i).toString(),
-          coins: 100,
-          status: 'active'
-        }));
-
-        if (!saved) localStorage.setItem(key, JSON.stringify(walletDatas[prefix]));
-
-        document.getElementById(`search-${prefix}`).addEventListener('input', () => renderPage(prefix, 1));
-      });
+      prefixes.forEach(prefix => createTab(prefix));
 
       tabButtonsDiv.addEventListener('click', e => {
         if (e.target.tagName === 'BUTTON') {
@@ -171,4 +193,3 @@
   </script>
 </body>
 </html>
-
